@@ -1,10 +1,6 @@
-use chess::{Chess, Color as ChessColor, Move};
+use chess::{Chess, Color as ChessColor, Move, PieceType, Status, ValidationResult};
 use ggez::{
-    conf::WindowMode,
-    event::{self, MouseButton},
-    glam::*,
-    graphics::{self, Color, DrawParam, Drawable, Image, ImageFormat, Mesh, Rect, Text, TextFragment},
-    Context, GameResult,
+    conf::WindowMode, event::{self, MouseButton}, glam::*, graphics::{self, Canvas, Color, DrawParam, Drawable, Image, ImageFormat, Mesh, Rect, Text, TextFragment}, input::keyboard::KeyCode, Context, GameResult
 };
 
 const WIDTH: f32 = 800.0;
@@ -33,10 +29,6 @@ fn should_reverse(s2m: ChessColor) -> bool {
     s2m as usize == 1
 }
 
-struct PromotionPrompt {
-    text: Text,
-    rect: Mesh,
-}
 
 struct MainState {
     board: Chess,
@@ -45,6 +37,7 @@ struct MainState {
     move_to_dot: Mesh,
     current_moves: Option<[Vec<Move>; 64]>,
     selected_square: Option<(u8, u8)>,
+    text_prompt: Option<Text>,
 }
 
 impl MainState {
@@ -101,6 +94,7 @@ impl MainState {
             piece_textures,
             current_moves: None,
             selected_square: None,
+            text_prompt: None,
         })
     }
 
@@ -109,10 +103,156 @@ impl MainState {
         let moves = self.current_moves.as_ref().unwrap();
         Some(&moves[selected_square.0 as usize + selected_square.1 as usize * 8])
     }
+
+    fn draw_pieces(&self, canvas: &mut Canvas) -> GameResult {
+        let reverse = should_reverse(self.board.turn);
+        let pieces = &self.board.board;
+        for piece in pieces {
+            let piece = if let Some(piece) = piece {
+                piece
+            } else {
+                continue;
+            };
+            let texture_idx = piece.piece_type as usize + if piece.color == ChessColor::White { 0 } else { 6 };
+            let texture = &self.piece_textures[texture_idx];
+            let x = piece.position.x as f32 * WIDTH / 8.0;
+            let y = piece.position.y as f32 * HEIGHT / 8.0;
+            let mut dest = Vec2::new(x, y);
+            if reverse {
+                dest.y = 700. - dest.y;
+            }
+            const SCALE: f32 = 100.0 / PIECE_TEX_SIZE;
+            let draw_params = DrawParam::new()
+                .dest(dest)
+                .scale(Vec2::new(SCALE, SCALE));
+            canvas.draw(texture, draw_params);
+        }
+        Ok(())
+    }
+    
+
+    fn draw_selected(&self, canvas: &mut Canvas) -> GameResult {
+        let reverse = should_reverse(self.board.turn);
+        let moves = self.get_moves();
+        if moves.is_none() {
+            return Ok(())
+        }
+        let moves = moves.unwrap();
+        for mv in moves {
+            let x = mv.to.x as f32 * WIDTH / 8.0;
+            let y = mv.to.y as f32 * HEIGHT / 8.0;
+            let mut dest = Vec2::new(50. + x,  y);
+            if reverse {
+                dest.y = 700. - dest.y;
+            }
+            dest.y += 50.;
+            canvas.draw(&self.move_to_dot, DrawParam::new().dest(dest));
+        }
+        Ok(())
+    }
+
+    fn draw_prompt(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+        if let Some(text) = &self.text_prompt {
+            println!("ddd");
+            let dims = text.dimensions(ctx).unwrap();
+            let width = dims.w;
+            let height = dims.h;
+            println!("{:?}", dims);
+            let x = WIDTH / 2. - width / 2.;
+            let y = HEIGHT / 2. - height / 2.;
+            let dest = Vec2::new(x, y);
+            canvas.draw(text, DrawParam::new().dest(dest));
+        }
+        Ok(())
+    }
+
+    fn click_square(&mut self, clicked: (u8, u8)) -> GameResult<Option<Status>> {
+        if let Some(current) = self.selected_square {
+            if current == clicked {
+                self.selected_square = None;
+                return Ok(None);
+            }
+            let moves = self.get_moves();
+            if moves.is_none() {
+                return Ok(None);
+            }
+            let moves = moves.unwrap();
+            let mv = moves.iter().find(|mv| (mv.to.x as u8, mv.to.y as u8) == clicked);
+            if let Some(mv) = mv {
+                let res = self.board.move_piece(mv.from, mv.to);
+                println!("{:?}", res);
+                if let ValidationResult::Valid(status) = res {
+                }
+
+                self.current_moves = None;
+                self.selected_square = None;
+            } else {
+                self.selected_square = Some(clicked);
+            }
+
+        } else {
+            self.selected_square = Some(clicked);
+        }
+        Ok(None)
+
+    }
 }
 
 impl event::EventHandler<ggez::GameError> for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
+        let status = self.board.status;
+        match status {
+            Status::Checkmate(color) => {
+                let text = if color == ChessColor::White {
+                    "Black wins"
+                } else {
+                    "White wins"
+                };
+                let text = Text::new(TextFragment::new(text).color(Color::from_rgb(255, 0, 0)).scale(64.));
+                self.text_prompt = Some(text);
+                if ctx.keyboard.is_key_just_pressed(KeyCode::Space) {
+                    self.board = Chess::new();
+                    self.current_moves = None;
+                    self.text_prompt = None;
+                }
+            }
+            Status::Draw(draw_type) => {
+                let text = match draw_type {
+                    chess::DrawType::Stalemate => "Stalemate",
+                    chess::DrawType::ThreefoldRepetition => "Threefold Repetition",
+                    chess::DrawType::FiftyMoveRule => "Fifty Move Rule",
+                };
+                let text = Text::new(TextFragment::new(text).color(Color::from_rgb(255, 0, 0)).scale(64.));
+                self.text_prompt = Some(text);
+                if ctx.keyboard.is_key_just_pressed(KeyCode::Space) {
+                    self.board = Chess::new();
+                    self.current_moves = None;
+                    self.text_prompt = None;
+                }
+            }
+            Status::AwaitingPromotion => {
+                let text = Text::new(TextFragment::new("Press Q, R, B, N to choose promotion").color(Color::from_rgb(255, 0, 0)).scale(32.));
+                self.text_prompt = Some(text);
+                let piece = if ctx.keyboard.is_key_just_pressed(KeyCode::Q) {
+                    Some(PieceType::Queen)
+                } else if ctx.keyboard.is_key_just_pressed(KeyCode::R) {
+                    Some(PieceType::Rook)
+                } else if ctx.keyboard.is_key_just_pressed(KeyCode::B) {
+                    Some(PieceType::Bishop)
+                } else if ctx.keyboard.is_key_just_pressed(KeyCode::N) {
+                    Some(PieceType::Knight)
+                } else {
+                    None
+                };
+                if let Some(piece) = piece {
+                    self.board.promote_piece(piece);
+                    self.current_moves = None;
+                    self.text_prompt = None;
+                }
+            }
+            _ => {}
+        }
+        
         if self.current_moves.is_none() {
             self.current_moves = Some(self.board.generate_valid_moves());
         }
@@ -132,84 +272,27 @@ impl event::EventHandler<ggez::GameError> for MainState {
         if reverse {
             board_coords.1 = 7 - board_coords.1;
         }
-        if let Some(current) = self.selected_square {
-            if current == board_coords {
-                self.selected_square = None;
-                return Ok(());
-            }
-            let moves = self.get_moves();
-            if moves.is_none() {
-                return Ok(());
-            }
-            let moves = moves.unwrap();
-            let mv = moves.iter().find(|mv| (mv.to.x as u8, mv.to.y as u8) == board_coords);
-            if let Some(mv) = mv {
-                self.board.move_piece(mv.from, mv.to);
-                self.current_moves = None;
-                self.selected_square = None;
-            } else {
-                self.selected_square = Some(board_coords);
-            }
-
-        } else {
-            self.selected_square = Some(board_coords);
-        }
+        self.click_square(board_coords)?;
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let mut canvas =
             graphics::Canvas::from_frame(ctx, graphics::Color::from([0.1, 0.2, 0.3, 1.0]));
-        let (sc_width, sc_height) = ctx.gfx.drawable_size();
         let reverse = should_reverse(self.board.turn);
-        println!("{}", reverse);
-        println!("{:?}", self.board.turn);
         let offset = if reverse { 800. } else { 0. };
         let scale = Vec2::new(1.0, if reverse {-1.0} else {1.0});
-        let dest = Vec2::new((sc_width - WIDTH) / 2., offset + (sc_height - HEIGHT) / 2.);
+        let dest = Vec2::new(0., offset);
         let draw_params = DrawParam::new()
             .scale(scale)
             .dest(dest);
         canvas.draw(&self.board_texture, draw_params);
 
-        let pieces = &self.board.board;
-        for piece in pieces {
-            let piece = if let Some(piece) = piece {
-                piece
-            } else {
-                continue;
-            };
-            let texture_idx = piece.piece_type as usize + if piece.color == ChessColor::White { 0 } else { 6 };
-            let texture = &self.piece_textures[texture_idx];
-            let x = piece.position.x as f32 * WIDTH / 8.0;
-            let y = piece.position.y as f32 * HEIGHT / 8.0;
-            let mut dest = Vec2::new((sc_width - WIDTH) / 2. + x, (sc_height - HEIGHT) / 2. + y);
-            if reverse {
-                dest.y = 700. - dest.y;
-            }
-            const SCALE: f32 = 100.0 / PIECE_TEX_SIZE;
-            let draw_params = DrawParam::new()
-                .dest(dest)
-                .scale(Vec2::new(SCALE, SCALE));
-            canvas.draw(texture, draw_params);
-        }
+        self.draw_pieces(&mut canvas)?;
+        self.draw_selected(&mut canvas)?;
+        self.draw_prompt(ctx, &mut canvas)?;
 
-        let moves = self.get_moves();
-        if moves.is_none() {
-            canvas.finish(ctx)?;
-            return Ok(());
-        }
-        let moves = moves.unwrap();
-        for mv in moves {
-            let x = mv.to.x as f32 * WIDTH / 8.0;
-            let y = mv.to.y as f32 * HEIGHT / 8.0;
-            let mut dest = Vec2::new(50. + (sc_width - WIDTH) / 2. + x, (sc_height - HEIGHT) / 2. + y);
-            if reverse {
-                dest.y = 700. - dest.y;
-            }
-            dest.y += 50.;
-            canvas.draw(&self.move_to_dot, DrawParam::new().dest(dest));
-        }
+
 
         canvas.finish(ctx)?;
 
