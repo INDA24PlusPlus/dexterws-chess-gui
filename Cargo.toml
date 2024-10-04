@@ -7,4 +7,6 @@ edition = "2021"
 
 [dependencies]
 chess = { git = "https://github.com/INDA24PlusPlus/liamt-chess", version = "0.1.0" }
+chess-networking = { git = "https://github.com/INDA24PlusPlus/chess-networking", version = "0.1.0" }
 ggez = "0.9.3"
+rmp-serde = "1.3.0"
