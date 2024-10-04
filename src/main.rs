@@ -1,9 +1,22 @@
-use std::{collections::VecDeque, io::{Bytes, Read, Write}, net::{TcpListener, TcpStream}, sync::{Arc, RwLock}};
+use std::{
+    collections::VecDeque,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    sync::{Arc, RwLock},
+};
 
 use chess::{Chess, Color as ChessColor, Move, PieceType, Position, Status, ValidationResult};
 use chess_networking::{Ack, GameState, PromotionPiece, Start};
 use ggez::{
-    conf::WindowMode, event::{self, MouseButton}, glam::*, graphics::{self, Canvas, Color, DrawParam, Drawable, Image, ImageFormat, Mesh, Rect, Text, TextFragment}, input::keyboard::KeyCode, Context, GameResult
+    conf::WindowMode,
+    event::{self, MouseButton},
+    glam::*,
+    graphics::{
+        self, Canvas, Color, DrawParam, Drawable, Image, ImageFormat, Mesh, Text,
+        TextFragment,
+    },
+    input::keyboard::KeyCode,
+    Context, GameResult,
 };
 
 const WIDTH: f32 = 800.0;
@@ -89,15 +102,9 @@ impl TryFrom<PacketType> for Vec<u8> {
     type Error = rmp_serde::encode::Error;
     fn try_from(packet: PacketType) -> Result<Self, Self::Error> {
         match packet {
-            PacketType::Start(start) => {
-                Vec::try_from(start)
-            }
-            PacketType::Move(mv) => {
-                Vec::try_from(mv)
-            }
-            PacketType::Ack(ack) => {
-                Vec::try_from(ack)
-            }
+            PacketType::Start(start) => Vec::try_from(start),
+            PacketType::Move(mv) => Vec::try_from(mv),
+            PacketType::Ack(ack) => Vec::try_from(ack),
         }
     }
 }
@@ -116,16 +123,16 @@ impl Network {
         let cache_clone = cache.clone();
         let thread_handle = Self::spawn_thread(stream.try_clone().unwrap(), cache_clone);
         Self {
-            ty: NetworkType::Host {
-                listener,
-                stream,
-            },
+            ty: NetworkType::Host { listener, stream },
             cache,
             thread_handle,
         }
     }
 
-    fn spawn_thread(stream: TcpStream, cache: Arc<RwLock<VecDeque<PacketType>>>) -> std::thread::JoinHandle<()> {
+    fn spawn_thread(
+        stream: TcpStream,
+        cache: Arc<RwLock<VecDeque<PacketType>>>,
+    ) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
             let mut stream = stream;
             loop {
@@ -258,10 +265,9 @@ impl Network {
     }
 
     fn send_packet(&mut self, packet: PacketType) {
-        let data : Vec<u8> = Vec::try_from(packet).unwrap();
+        let data: Vec<u8> = Vec::try_from(packet).unwrap();
         self.send(&data);
     }
-
 
     fn close(self) {
         match self.ty {
@@ -348,14 +354,20 @@ impl MoveKind {
     fn to(&self) -> Position {
         match self {
             MoveKind::Builtin(mv) => mv.to,
-            MoveKind::Network(mv) => Position { x: mv.to.0 as usize, y: mv.to.1 as usize },
+            MoveKind::Network(mv) => Position {
+                x: mv.to.0 as usize,
+                y: mv.to.1 as usize,
+            },
         }
     }
 
     fn from(&self) -> Position {
         match self {
             MoveKind::Builtin(mv) => mv.from,
-            MoveKind::Network(mv) => Position { x: mv.from.0 as usize, y: mv.from.1 as usize },
+            MoveKind::Network(mv) => Position {
+                x: mv.from.0 as usize,
+                y: mv.from.1 as usize,
+            },
         }
     }
 
@@ -384,7 +396,7 @@ impl MoveKind {
 enum Phase {
     Move,
     Validate(MoveKind),
-    End(Status)
+    End(Status),
 }
 
 struct MainState {
@@ -402,7 +414,6 @@ struct MainState {
 impl MainState {
     fn new(ctx: &mut Context, game_type: GameType) -> GameResult<MainState> {
         let board = Chess::new();
-        let format = ctx.gfx.surface_format();
         let mut pixels = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * 4);
         let sq_size = WIDTH / 8.0;
         for y in 0..8 {
@@ -443,7 +454,14 @@ impl MainState {
             Image::from_bytes(ctx, include_bytes!("../assets/p_b.png"))?,
         ];
 
-        let move_to_dot = Mesh::new_circle(ctx, graphics::DrawMode::fill(), Vec2::new(0., 0.), 20., 2., Color::from_rgba(255, 255, 255, 128))?;
+        let move_to_dot = Mesh::new_circle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Vec2::new(0., 0.),
+            20.,
+            2.,
+            Color::from_rgba(255, 255, 255, 128),
+        )?;
 
         Ok(MainState {
             board,
@@ -473,7 +491,12 @@ impl MainState {
             } else {
                 continue;
             };
-            let texture_idx = piece.piece_type as usize + if piece.color == ChessColor::White { 0 } else { 6 };
+            let texture_idx = piece.piece_type as usize
+                + if piece.color == ChessColor::White {
+                    0
+                } else {
+                    6
+                };
             let texture = &self.piece_textures[texture_idx];
             let x = piece.position.x as f32 * WIDTH / 8.0;
             let y = piece.position.y as f32 * HEIGHT / 8.0;
@@ -482,26 +505,23 @@ impl MainState {
                 dest.y = 700. - dest.y;
             }
             const SCALE: f32 = 100.0 / PIECE_TEX_SIZE;
-            let draw_params = DrawParam::new()
-                .dest(dest)
-                .scale(Vec2::new(SCALE, SCALE));
+            let draw_params = DrawParam::new().dest(dest).scale(Vec2::new(SCALE, SCALE));
             canvas.draw(texture, draw_params);
         }
         Ok(())
     }
-    
 
     fn draw_selected(&self, canvas: &mut Canvas) -> GameResult {
         let reverse = self.should_reverse();
         let moves = self.get_moves();
         if moves.is_none() {
-            return Ok(())
+            return Ok(());
         }
         let moves = moves.unwrap();
         for mv in moves {
             let x = mv.to.x as f32 * WIDTH / 8.0;
             let y = mv.to.y as f32 * HEIGHT / 8.0;
-            let mut dest = Vec2::new(50. + x,  y);
+            let mut dest = Vec2::new(50. + x, y);
             if reverse {
                 dest.y = 700. - dest.y;
             }
@@ -555,7 +575,9 @@ impl MainState {
                     return Ok(());
                 }
                 let moves = moves.unwrap();
-                moves.iter().find(|mv| (mv.to.x as u8, mv.to.y as u8) == clicked)
+                moves
+                    .iter()
+                    .find(|mv| (mv.to.x as u8, mv.to.y as u8) == clicked)
             };
             if let Some(mv) = mv {
                 let mv = mv.clone();
@@ -641,9 +663,11 @@ impl MainState {
     }
 
     fn should_reverse(&self) -> bool {
-        (self.board.turn == ChessColor::White
-            && self.player_handler.both_local())
-        || self.player_handler.one_local().is_some_and(|color| color == ChessColor::White)
+        (self.board.turn == ChessColor::White && self.player_handler.both_local())
+            || self
+                .player_handler
+                .one_local()
+                .is_some_and(|color| color == ChessColor::White)
     }
 }
 
@@ -670,7 +694,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         } else {
                             "White wins"
                         };
-                        let text = Text::new(TextFragment::new(text).color(Color::from_rgb(255, 0, 0)).scale(64.));
+                        let text = Text::new(
+                            TextFragment::new(text)
+                                .color(Color::from_rgb(255, 0, 0))
+                                .scale(64.),
+                        );
                         self.text_prompt = Some(text);
                     }
                     Status::Draw(draw_type) => {
@@ -679,7 +707,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             chess::DrawType::ThreefoldRepetition => "Threefold Repetition",
                             chess::DrawType::FiftyMoveRule => "Fifty Move Rule",
                         };
-                        let text = Text::new(TextFragment::new(text).color(Color::from_rgb(255, 0, 0)).scale(64.));
+                        let text = Text::new(
+                            TextFragment::new(text)
+                                .color(Color::from_rgb(255, 0, 0))
+                                .scale(64.),
+                        );
                         self.text_prompt = Some(text);
                     }
                     _ => {}
@@ -695,7 +727,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 }
             }
         }
-        
+
         if self.current_moves.is_none() {
             self.current_moves = Some(self.board.generate_valid_moves());
         }
@@ -707,24 +739,19 @@ impl event::EventHandler<ggez::GameError> for MainState {
             graphics::Canvas::from_frame(ctx, graphics::Color::from([0.1, 0.2, 0.3, 1.0]));
         let reverse = self.should_reverse();
         let offset = if reverse { 800. } else { 0. };
-        let scale = Vec2::new(1.0, if reverse {-1.0} else {1.0});
+        let scale = Vec2::new(1.0, if reverse { -1.0 } else { 1.0 });
         let dest = Vec2::new(0., offset);
-        let draw_params = DrawParam::new()
-            .scale(scale)
-            .dest(dest);
+        let draw_params = DrawParam::new().scale(scale).dest(dest);
         canvas.draw(&self.board_texture, draw_params);
 
         self.draw_pieces(&mut canvas)?;
         self.draw_selected(&mut canvas)?;
         self.draw_prompt(ctx, &mut canvas)?;
 
-
-
         canvas.finish(ctx)?;
 
         Ok(())
     }
-
 }
 
 pub fn main() -> GameResult {
@@ -757,12 +784,14 @@ pub fn main() -> GameResult {
         GameType::Client(_) => "Chess Client",
     };
 
-    let cb = ggez::ContextBuilder::new("Chess GUI", "Dexter WS").window_mode(
-        WindowMode::default()
-            .dimensions(WIDTH, HEIGHT)
-            .max_dimensions(WIDTH, HEIGHT)
-            .resizable(false)
-    ).window_setup(ggez::conf::WindowSetup::default().title(title));
+    let cb = ggez::ContextBuilder::new("Chess GUI", "Dexter WS")
+        .window_mode(
+            WindowMode::default()
+                .dimensions(WIDTH, HEIGHT)
+                .max_dimensions(WIDTH, HEIGHT)
+                .resizable(false),
+        )
+        .window_setup(ggez::conf::WindowSetup::default().title(title));
     let (mut ctx, event_loop) = cb.build()?;
 
     let state = MainState::new(&mut ctx, game_type)?;
